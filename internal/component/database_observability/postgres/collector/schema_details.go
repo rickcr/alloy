@@ -332,13 +332,10 @@ func (c *SchemaDetails) getAllDatabases(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("error iterating database rows: %w", err)
 	}
 
-	level.Info(c.logger).Log("msg", "discovered databases", "count", len(databases), "databases", fmt.Sprintf("%v", databases))
 	return databases, nil
 }
 
 func (c *SchemaDetails) extractSchemas(ctx context.Context, dbName string, dbConnection *sql.DB) error {
-	level.Debug(c.logger).Log("msg", "extracting schema information from database", "datname", dbName)
-
 	schemaRs, err := dbConnection.QueryContext(ctx, selectSchemaNames)
 	if err != nil {
 		return fmt.Errorf("failed to query pg_namespace for database %s: %w", dbName, err)
@@ -451,13 +448,6 @@ func (c *SchemaDetails) extractNames(ctx context.Context) error {
 		level.Error(c.logger).Log("msg", "failed to discover databases", "err", err)
 		return fmt.Errorf("failed to discover databases: %w", err)
 	}
-
-	if len(databases) == 0 {
-		level.Warn(c.logger).Log("msg", "no databases discovered")
-		return fmt.Errorf("no databases discovered")
-	}
-
-	level.Info(c.logger).Log("msg", "collecting schema information from multiple databases", "database_count", len(databases))
 
 	for _, dbName := range databases {
 		databaseDSN, err := replaceDatabaseNameInDSN(c.dbDSN, dbName)
