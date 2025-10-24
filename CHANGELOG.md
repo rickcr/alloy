@@ -35,6 +35,8 @@ Main (unreleased)
 
 - Add a `stat_statements` configuration block to the `prometheus.exporter.postgres` component to enable selecting both the query ID and the full SQL statement. The new block includes one option to enable statement selection, and another to configure the maximum length of the statement text. (@SimonSerrano) 
 
+- Add `prometheus.static.exporter` that exposes metrics specified in a text file in Prometheus exposition format. (@kalleep)
+
 ### Enhancements
 
 - Add support of `tls` in components `loki.source.(awsfirehose|gcplog|heroku|api)` and `prometheus.receive_http` and `pyroscope.receive_http`. (@fgouteroux)
@@ -47,6 +49,14 @@ Main (unreleased)
 
 - `prometheus.exporter.postgres` dependency has been updated to v0.18.1. This includes new `stat_progress_vacuum` and `buffercache_summary` collectors, as well as other bugfixes and enhancements. (@cristiangreco)
 
+- Schedule new path targets faster in `loki.source.file`. (@kalleep)
+
+- Update Beyla component to 2.7.4. (@grcevski)
+- 
+- Support delimiters in `stage.luhn`. (@dehaansa)
+
+- Improve debug info output from exported receivers (loki, prometheus and pyroscope). (@kalleep)
+
 ### Bugfixes
 
 - Stop `loki.source.kubernetes` discarding log lines with duplicate timestamps. (@ciaranj)
@@ -54,6 +64,14 @@ Main (unreleased)
 - Fix direction of arrows for pyroscope components in UI graph. (@dehaansa)
 
 - Only log EOF errors for syslog port investigations in `loki.source.syslog` as Debug, not Warn. (@dehaansa)
+
+- Fix panic in `otelcol.receiver.syslog` when no tcp block was configured. (@kalleep)
+
+- Support Scrape Protocol specification in CRDS for `prometheus.operator.*` components. (@dehaansa) 
+
+- Fix `otelcol.exporter.splunkhec` arguments missing documented `otel_attrs_to_hec_metadata` block. (@dehaansa)
+
+- `local.file_match` now publish targets faster whenever targets in arguments changes. (@kalleep)
 
 v1.11.2
 -----------------
