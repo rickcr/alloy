@@ -591,6 +591,7 @@ func (t TailTest) VerifyTailOutput(tail *Tail, lines []string, expectEOF bool) {
 
 func (t TailTest) ReadLines(tail *Tail, lines []string) {
 	for idx, line := range lines {
+		t.T.Logf("waiting to receive line: %s", line)
 		tailedLine, ok := <-tail.Lines
 		if !ok {
 			// tail.Lines is closed and empty.
@@ -611,6 +612,7 @@ func (t TailTest) ReadLines(tail *Tail, lines []string) {
 					"expecting <<%s>>>, but got <<<%s>>>",
 				line, tailedLine.Text)
 		}
+		t.T.Logf("received line: %s", tailedLine.Text)
 	}
 }
 
