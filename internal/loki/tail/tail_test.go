@@ -432,8 +432,7 @@ func reSeek(t *testing.T, poll bool) {
 	}
 	tailTest.RemoveFile("test.txt")
 
-	// Stop the tail properly to avoid hanging on Linux inotify
-	tailTest.Cleanup(tail, true)
+	tailTest.Cleanup(tail, false)
 }
 
 func TestTellRace(t *testing.T) {
