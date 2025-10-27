@@ -8,7 +8,6 @@ package tail
 
 import (
 	_ "fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -79,7 +78,7 @@ func TestWaitsForFileToExistRelativePath(t *testing.T) {
 	go tailTest.VerifyTailOutput(tail, []string{"hello", "world"}, false)
 
 	<-time.After(100 * time.Millisecond)
-	if err := ioutil.WriteFile("test.txt", []byte("hello\nworld\n"), 0600); err != nil {
+	if err := os.WriteFile("test.txt", []byte("hello\nworld\n"), 0600); err != nil {
 		tailTest.Fatal(err)
 	}
 	tailTest.Cleanup(tail, true)
@@ -425,14 +424,16 @@ func reSeek(t *testing.T, poll bool) {
 	tailTest.TruncateFile("test.txt", "h311o\nw0r1d\nendofworld\n")
 
 	// Delete after a reasonable delay, to give tail sufficient time
-	// to read all lines.
-	<-time.After(100 * time.Millisecond)
+	// to read all lines. Increased delay for inotify processing.
+	if poll {
+		<-time.After(100 * time.Millisecond)
+	} else {
+		<-time.After(500 * time.Millisecond)
+	}
 	tailTest.RemoveFile("test.txt")
 
-	// Do not bother with stopping as it could kill the tomb during
-	// the reading of data written above. Timings can vary based on
-	// test environment.
-	tailTest.Cleanup(tail, false)
+	// Stop the tail properly to avoid hanging on Linux inotify
+	tailTest.Cleanup(tail, true)
 }
 
 func TestTellRace(t *testing.T) {
@@ -515,14 +516,14 @@ func NewTailTest(name string, t *testing.T) TailTest {
 }
 
 func (t TailTest) CreateFile(name string, contents string) {
-	err := ioutil.WriteFile(t.path+"/"+name, []byte(contents), 0600)
+	err := os.WriteFile(t.path+"/"+name, []byte(contents), 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (t TailTest) AppendToFile(name string, contents string) {
-	err := ioutil.WriteFile(t.path+"/"+name, []byte(contents), 0600|os.ModeAppend)
+	err := os.WriteFile(t.path+"/"+name, []byte(contents), 0600|os.ModeAppend)
 	if err != nil {
 		t.Fatal(err)
 	}
