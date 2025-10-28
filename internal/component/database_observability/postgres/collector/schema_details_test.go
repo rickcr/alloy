@@ -1268,3 +1268,512 @@ func Test_Postgres_SchemaDetails_caching(t *testing.T) {
 		lokiClient.Stop()
 	})
 }
+
+func Test_Postgres_SchemaDetails_ErrorCases(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/hashicorp/golang-lru/v2/expirable.NewLRU[...].func1"))
+
+	t.Run("error querying columns", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").
+			WillReturnError(fmt.Errorf("column query error"))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to query table columns")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error scanning columns", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation"}).
+				AddRow("id", "integer", true, nil, ""))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to scan table columns")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error iterating columns result set", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").
+			WillReturnRows(
+				sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+					AddRow("id", "integer", true, nil, "", true).
+					RowError(0, fmt.Errorf("result set error")))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to iterate over table columns result set")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error querying indexes", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").
+			WillReturnError(fmt.Errorf("index query error"))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to query indexes")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error scanning indexes", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"index_name", "index_type", "unique", "column_names", "expressions"}).
+				AddRow("idx_test", "btree", true, pq.StringArray{"id"}, pq.StringArray{}))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to scan indexes")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error iterating indexes result set", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").
+			WillReturnRows(
+				sqlmock.NewRows([]string{"index_name", "index_type", "unique", "column_names", "expressions", "has_nullable_column"}).
+					AddRow("idx_test", "btree", true, pq.StringArray{"id"}, pq.StringArray{}, false).
+					RowError(0, fmt.Errorf("result set error")))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "error during iterating over indexes")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error querying foreign keys", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"index_name", "index_type", "unique", "column_names", "expressions", "has_nullable_column"}))
+
+		mock.ExpectQuery(selectForeignKeys).WithArgs("public", "test_table").
+			WillReturnError(fmt.Errorf("foreign key query error"))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to query foreign keys")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error scanning foreign keys", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"index_name", "index_type", "unique", "column_names", "expressions", "has_nullable_column"}))
+
+		mock.ExpectQuery(selectForeignKeys).WithArgs("public", "test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"constraint_name", "column_name", "referenced_table_name"}).
+				AddRow("fk_test", "author_id", "authors"))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to scan foreign keys")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error iterating foreign keys result set", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"table_name"}).AddRow("test_table"))
+
+		mock.ExpectQuery(selectColumnNames).WithArgs("public.test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"column_name", "column_type", "not_nullable", "column_default", "identity_generation", "is_primary_key"}).
+				AddRow("id", "integer", true, nil, "", true))
+
+		mock.ExpectQuery(selectIndexes).WithArgs("public", "test_table").RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"index_name", "index_type", "unique", "column_names", "expressions", "has_nullable_column"}))
+
+		mock.ExpectQuery(selectForeignKeys).WithArgs("public", "test_table").
+			WillReturnRows(
+				sqlmock.NewRows([]string{"constraint_name", "column_name", "referenced_table_name", "referenced_column_name"}).
+					AddRow("fk_test", "author_id", "authors", "id").
+					RowError(0, fmt.Errorf("result set error")))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to iterate over foreign keys result set")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("error iterating tables result set", func(t *testing.T) {
+		t.Parallel()
+
+		db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+		require.NoError(t, err)
+		defer db.Close()
+
+		lokiClient := loki_fake.NewClient(func() {})
+		defer lokiClient.Stop()
+
+		logBuffer := syncbuffer.Buffer{}
+		collector, err := NewSchemaDetails(SchemaDetailsArguments{
+			DB:              db,
+			DSN:             "postgres://user:pass@localhost:5432/testdb",
+			CollectInterval: time.Millisecond,
+			EntryHandler:    lokiClient,
+			Logger:          log.NewLogfmtLogger(log.NewSyncWriter(&logBuffer)),
+			dbConnectionFactory: func(dsn string) (*sql.DB, error) {
+				return db, nil
+			},
+		})
+		require.NoError(t, err)
+
+		mock.ExpectQuery(selectAllDatabases).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"datname"}).AddRow("testdb"))
+
+		mock.ExpectQuery(selectSchemaNames).WithoutArgs().RowsWillBeClosed().
+			WillReturnRows(sqlmock.NewRows([]string{"schema_name"}).AddRow("public"))
+
+		mock.ExpectQuery(selectTableNames).WithArgs("public").
+			WillReturnRows(
+				sqlmock.NewRows([]string{"table_name"}).
+					AddRow("test_table").
+					RowError(0, fmt.Errorf("tables result set error")))
+
+		err = collector.Start(t.Context())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(logBuffer.String(), "failed to iterate over tables result set")
+		}, 2*time.Second, 100*time.Millisecond)
+
+		collector.Stop()
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+}
