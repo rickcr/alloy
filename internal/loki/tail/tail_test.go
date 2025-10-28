@@ -335,7 +335,7 @@ func reOpen(t *testing.T, poll bool) {
 		delay = 300 * time.Millisecond // account for POLL_DURATION
 	} else {
 		name = "reopen-inotify"
-		delay = 100 * time.Millisecond
+		delay = 500 * time.Millisecond
 	}
 	tailTest := NewTailTest(name, t)
 	fmt.Println("TestReOpenInotify: creating file")
