@@ -7,6 +7,7 @@
 package tail
 
 import (
+	"fmt"
 	_ "fmt"
 	"os"
 	"strings"
@@ -337,7 +338,7 @@ func reOpen(t *testing.T, poll bool) {
 		delay = 100 * time.Millisecond
 	}
 	tailTest := NewTailTest(name, t)
-	t.Logf("creating file")
+	fmt.Println("TestReOpenInotify: creating file")
 	tailTest.CreateFile("test.txt", "hello\nworld\n")
 	tail := tailTest.StartTail(
 		"test.txt",
@@ -348,32 +349,32 @@ func reOpen(t *testing.T, poll bool) {
 	if poll {
 		// deletion must trigger reopen
 		<-time.After(delay)
-		t.Logf("removing file")
+		fmt.Println("TestReOpenInotify: removing file")
 		tailTest.RemoveFile("test.txt")
 		<-time.After(delay)
-		t.Logf("creating file")
+		fmt.Println("TestReOpenInotify: creating file")
 		tailTest.CreateFile("test.txt", "more\ndata\n")
 	} else {
 		// In inotify mode, fsnotify is currently unable to deliver notifications
 		// about deletion of open files, so we are not testing file deletion.
 		// (see https://github.com/fsnotify/fsnotify/issues/194 for details).
 		<-time.After(delay)
-		t.Logf("appending to file")
+		fmt.Println("TestReOpenInotify: appending to file")
 		tailTest.AppendToFile("test.txt", "more\ndata\n")
 	}
 
 	// rename must trigger reopen
 	<-time.After(delay)
-	t.Logf("renaming file")
+	fmt.Println("TestReOpenInotify: renaming file")
 	tailTest.RenameFile("test.txt", "test.txt.rotated")
 	<-time.After(delay)
-	t.Logf("creating file")
+	fmt.Println("TestReOpenInotify: creating file")
 	tailTest.CreateFile("test.txt", "endofworld\n")
 
 	// Delete after a reasonable delay, to give tail sufficient time
 	// to read all lines.
 	<-time.After(delay)
-	t.Logf("removing file")
+	fmt.Println("TestReOpenInotify: removing file")
 	tailTest.RemoveFile("test.txt")
 	<-time.After(delay)
 
