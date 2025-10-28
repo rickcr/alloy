@@ -599,7 +599,7 @@ func (t TailTest) VerifyTailOutput(tail *Tail, lines []string, expectEOF bool) {
 
 func (t TailTest) ReadLines(tail *Tail, lines []string) {
 	for idx, line := range lines {
-		fmt.Printf("ReadLines: eceive line: %s", line)
+		fmt.Printf("ReadLines: waiting for line: %s\n", line)
 		tailedLine, ok := <-tail.Lines
 		if !ok {
 			// tail.Lines is closed and empty.
@@ -620,7 +620,7 @@ func (t TailTest) ReadLines(tail *Tail, lines []string) {
 					"expecting <<%s>>>, but got <<<%s>>>",
 				line, tailedLine.Text)
 		}
-		fmt.Printf("ReadLines: received line: %s", tailedLine.Text)
+		fmt.Printf("ReadLines: received line: %s\n", tailedLine.Text)
 	}
 }
 
