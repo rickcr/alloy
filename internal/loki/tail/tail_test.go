@@ -7,7 +7,6 @@
 package tail
 
 import (
-	"fmt"
 	_ "fmt"
 	"os"
 	"strings"
@@ -16,6 +15,9 @@ import (
 
 	"github.com/grafana/alloy/internal/loki/tail/ratelimiter"
 	"github.com/grafana/alloy/internal/loki/tail/watch"
+	loki_util "github.com/grafana/alloy/internal/loki/util"
+	"github.com/grafana/alloy/internal/runtime/logging/level"
+	"github.com/grafana/alloy/internal/util"
 )
 
 var testPollingOptions = watch.PollingFileWatcherOptions{
@@ -328,6 +330,8 @@ func maxLineSize(t *testing.T, follow bool, fileContent string, expected []strin
 }
 
 func reOpen(t *testing.T, poll bool) {
+	logger := util.TestLogger(t)
+	level.Info(logger).Log("msg", "TestReOpenPolling: starting")
 	var name string
 	var delay time.Duration
 	if poll {
@@ -338,43 +342,50 @@ func reOpen(t *testing.T, poll bool) {
 		delay = 500 * time.Millisecond
 	}
 	tailTest := NewTailTest(name, t)
-	fmt.Println("TestReOpenInotify: creating file")
+	level.Info(logger).Log("msg", "TestReOpenInotify: creating file")
 	tailTest.CreateFile("test.txt", "hello\nworld\n")
 	tail := tailTest.StartTail(
 		"test.txt",
-		Config{Follow: true, ReOpen: true, Poll: poll, PollOptions: testPollingOptions})
+		Config{
+			Follow:      true,
+			ReOpen:      true,
+			Poll:        poll,
+			PollOptions: testPollingOptions,
+			Logger:      loki_util.NewLogAdapter(logger),
+		})
 	content := []string{"hello", "world", "more", "data", "endofworld"}
 	go tailTest.VerifyTailOutput(tail, content, false)
+	t.Logf("TestReOpenPolling: VerifyTailOutput started")
 
 	if poll {
 		// deletion must trigger reopen
 		<-time.After(delay)
-		fmt.Println("TestReOpenInotify: removing file")
+		level.Info(logger).Log("msg", "TestReOpenInotify: removing file")
 		tailTest.RemoveFile("test.txt")
 		<-time.After(delay)
-		fmt.Println("TestReOpenInotify: creating file")
+		level.Info(logger).Log("msg", "TestReOpenInotify: creating file")
 		tailTest.CreateFile("test.txt", "more\ndata\n")
 	} else {
 		// In inotify mode, fsnotify is currently unable to deliver notifications
 		// about deletion of open files, so we are not testing file deletion.
 		// (see https://github.com/fsnotify/fsnotify/issues/194 for details).
 		<-time.After(delay)
-		fmt.Println("TestReOpenInotify: appending to file")
+		level.Info(logger).Log("msg", "TestReOpenInotify: appending to file")
 		tailTest.AppendToFile("test.txt", "more\ndata\n")
 	}
 
 	// rename must trigger reopen
 	<-time.After(delay)
-	fmt.Println("TestReOpenInotify: renaming file")
+	level.Info(logger).Log("msg", "TestReOpenInotify: renaming file")
 	tailTest.RenameFile("test.txt", "test.txt.rotated")
 	<-time.After(delay)
-	fmt.Println("TestReOpenInotify: creating file")
+	level.Info(logger).Log("msg", "TestReOpenInotify: creating file")
 	tailTest.CreateFile("test.txt", "endofworld\n")
 
 	// Delete after a reasonable delay, to give tail sufficient time
 	// to read all lines.
 	<-time.After(delay)
-	fmt.Println("TestReOpenInotify: removing file")
+	level.Info(logger).Log("msg", "TestReOpenInotify: removing file")
 	tailTest.RemoveFile("test.txt")
 	<-time.After(delay)
 
@@ -599,7 +610,7 @@ func (t TailTest) VerifyTailOutput(tail *Tail, lines []string, expectEOF bool) {
 
 func (t TailTest) ReadLines(tail *Tail, lines []string) {
 	for idx, line := range lines {
-		fmt.Printf("ReadLines: waiting for line: %s\n", line)
+		tail.Logger.Printf("ReadLines: waiting for line: %s\n", line)
 		tailedLine, ok := <-tail.Lines
 		if !ok {
 			// tail.Lines is closed and empty.
@@ -620,7 +631,7 @@ func (t TailTest) ReadLines(tail *Tail, lines []string) {
 					"expecting <<%s>>>, but got <<<%s>>>",
 				line, tailedLine.Text)
 		}
-		fmt.Printf("ReadLines: received line: %s\n", tailedLine.Text)
+		tail.Logger.Printf("ReadLines: received line: %s\n", tailedLine.Text)
 	}
 }
 
